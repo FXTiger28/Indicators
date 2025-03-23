@@ -1,0 +1,566 @@
+//+------------------------------------------------------------------+
+//|                                                        Trend.mq4 |
+//|                                                  FX Tiger @ 2023 |
+//|                                             https://www.mql5.com |
+//+------------------------------------------------------------------+
+
+/*
+Trend indicator analyses the trend in the market with the following signals:
+- When green line increases and red line decreases it means uptrend.
+
+While in uptrend, we analyze polarity and momentum signals different way than when price is not trending:
+- Positive polarity in an uptrend gives long extend go signal no matter of momentum
+
+With lime signal, we are looking for only long entries.
+*/
+
+#property copyright "FX Tiger @ 2023"
+#property link      "https://www.mql5.com"
+#property version   "1.00"
+#property strict
+#property indicator_separate_window
+#property indicator_minimum 0
+#property indicator_maximum 1
+#property indicator_buffers 23
+//--- plot Cycle
+#property indicator_label1  "Positive"
+#property indicator_type1   DRAW_LINE
+#property indicator_color1  clrLime
+#property indicator_style1  STYLE_SOLID
+#property indicator_width1  2
+
+#property indicator_label2  "Negative"
+#property indicator_type2   DRAW_LINE
+#property indicator_color2  clrRed
+#property indicator_style2  STYLE_SOLID
+#property indicator_width2  2
+
+#property indicator_label5  "ArrowStrongUp"
+#property indicator_type5   DRAW_ARROW
+#property indicator_color5  clrLime
+#property indicator_style5  STYLE_SOLID
+#property indicator_width5  2
+
+#property indicator_label6  "ArrowUp"
+#property indicator_type6   DRAW_ARROW
+#property indicator_color6  clrGreen
+#property indicator_style6  STYLE_SOLID
+#property indicator_width6  2
+
+#property indicator_label7  "ArrowSideways"
+#property indicator_type7   DRAW_ARROW
+#property indicator_color7  clrWhite
+#property indicator_style7  STYLE_SOLID
+#property indicator_width7  2
+
+#property indicator_label8  "ArrowDown"
+#property indicator_type8   DRAW_ARROW
+#property indicator_color8  clrMaroon
+#property indicator_style8  STYLE_SOLID
+#property indicator_width8  2
+
+#property indicator_label9  "ArrowStrongDown"
+#property indicator_type9   DRAW_ARROW
+#property indicator_color9  clrRed
+#property indicator_style9  STYLE_SOLID
+#property indicator_width9  2
+
+//--- input parameters
+extern int  timeframe         = 0;
+input int   period            = 6;
+input int   history           = 10000;
+
+//--- global variables
+int         divider           = 0;
+int         prev_GT_above     = 0;
+int         prev_GT_below     = 0;
+int         prev_GT_increase  = 0;
+int         prev_GT_decrease  = 0;
+int         prev_GI_increase  = 0;
+int         prev_GI_decrease  = 0;
+bool        prev_uptrend      = false;
+bool        prev_downtrend    = false;
+
+//--- indicator buffers
+double      EMAPosBuffer[];
+double      EMANegBuffer[];
+double      SumPosBuffer[];
+double      SumNegBuffer[];
+double      Bartime[];
+double      Signal[];
+
+double      ExtEMA_4[];
+double      ExtEMA_8[];
+double      ExtEMA_12[];
+double      ExtEMA_16[];
+double      ExtEMA_20[];
+double      ExtEMA_30[];
+double      ExtEMA_35[];
+double      ExtEMA_40[];
+double      ExtEMA_45[];
+double      ExtEMA_50[];
+double      ExtEMA_55[];
+double      ExtEMA_60[];
+
+//--- arrow buffers
+double      ArrowUpStrong[];
+double      ArrowUp[];
+double      ArrowSideways[];
+double      ArrowDown[];
+double      ArrowDownStrong[];
+
+//+------------------------------------------------------------------+
+//| Custom indicator initialization function                         |
+//+------------------------------------------------------------------+
+int OnInit()
+{
+//--- indicator buffers mapping
+
+   string short_name = "Trend";
+   IndicatorShortName(short_name);
+
+   IndicatorBuffers(23);
+   IndicatorDigits(Digits);
+   SetIndexBuffer(0,EMAPosBuffer);
+   SetIndexBuffer(1,EMANegBuffer);
+   SetIndexBuffer(2,SumPosBuffer);
+   SetIndexBuffer(3,SumNegBuffer);
+   SetIndexBuffer(4,ArrowUpStrong);
+   SetIndexBuffer(5,ArrowUp);
+   SetIndexBuffer(6,ArrowSideways);
+   SetIndexBuffer(7,ArrowDown);
+   SetIndexBuffer(8,ArrowDownStrong);
+   SetIndexBuffer(9,Bartime);
+   SetIndexBuffer(10,Signal);
+   SetIndexBuffer(11,ExtEMA_4);
+   SetIndexBuffer(12,ExtEMA_8);
+   SetIndexBuffer(13,ExtEMA_12);
+   SetIndexBuffer(14,ExtEMA_16);
+   SetIndexBuffer(15,ExtEMA_20);
+   SetIndexBuffer(16,ExtEMA_30);
+   SetIndexBuffer(17,ExtEMA_35);
+   SetIndexBuffer(18,ExtEMA_40);
+   SetIndexBuffer(19,ExtEMA_45);
+   SetIndexBuffer(20,ExtEMA_50);
+   SetIndexBuffer(21,ExtEMA_55);
+   SetIndexBuffer(22,ExtEMA_60);
+   
+//---- 0 value will not be displayed
+   SetIndexEmptyValue(4,0);
+   SetIndexEmptyValue(5,0);
+   SetIndexEmptyValue(6,0);
+   SetIndexEmptyValue(7,0);
+   SetIndexEmptyValue(8,0);
+      
+//---- drawing settings
+   SetIndexStyle(0,DRAW_LINE);
+   SetIndexStyle(1,DRAW_LINE);
+   SetIndexStyle(2,DRAW_NONE);
+   SetIndexStyle(3,DRAW_NONE);
+   SetIndexStyle(4,DRAW_ARROW);
+   SetIndexStyle(5,DRAW_ARROW);
+   SetIndexStyle(6,DRAW_ARROW);
+   SetIndexStyle(7,DRAW_ARROW);
+   SetIndexStyle(8,DRAW_ARROW);
+   SetIndexStyle(9,DRAW_NONE);
+   SetIndexStyle(10,DRAW_NONE);
+   SetIndexStyle(11,DRAW_NONE);
+   SetIndexStyle(12,DRAW_NONE);
+   SetIndexStyle(13,DRAW_NONE);
+   SetIndexStyle(14,DRAW_NONE);
+   SetIndexStyle(15,DRAW_NONE);
+   SetIndexStyle(16,DRAW_NONE);
+   SetIndexStyle(17,DRAW_NONE);
+   SetIndexStyle(18,DRAW_NONE);
+   SetIndexStyle(19,DRAW_NONE);
+   SetIndexStyle(20,DRAW_NONE);
+   SetIndexStyle(21,DRAW_NONE);
+   SetIndexStyle(22,DRAW_NONE);
+   
+//---- arrow styles   
+   SetIndexArrow(4, 108);                    
+   SetIndexArrow(5, 108);   
+   SetIndexArrow(6, 108);   
+   SetIndexArrow(7, 108);   
+   SetIndexArrow(8, 108);   
+
+//--- calculate value for divider based on period
+   for(int i = period; i > 0; i--)
+   {
+      divider += i;
+   }
+
+   return(INIT_SUCCEEDED);
+}
+//+------------------------------------------------------------------+
+//| Custom indicator iteration function                              |
+//+------------------------------------------------------------------+
+int OnCalculate(const int rates_total,
+                const int prev_calculated,
+                const datetime &time[],
+                const double &open[],
+                const double &high[],
+                const double &low[],
+                const double &close[],
+                const long &tick_volume[],
+                const long &volume[],
+                const int &spread[])
+{
+   // Check out how many bars need to be counted
+   if(rates_total < 30) return(0);                                            // Check if we have minimum amount bars available
+   int counted_bars     = (prev_calculated == 0) ? 0 : (prev_calculated - 1); // Number of counted bars
+   int developingBars   = rates_total - counted_bars;                         // Number of developing bars
+   if(developingBars > history) developingBars = history;                     // If there are too many bars, then calculate for specified amount
+   if(developingBars > rates_total - 30) developingBars = rates_total - 30;   // First 30 bars are not counted
+   int limit            = developingBars - 1;                                 // Index to the first developing bar
+
+   for(int i = limit; i >= 0; i--)
+   {
+      //--- GMMA Traders
+      ExtEMA_4[i]=iMA(NULL,timeframe,4,0,MODE_EMA,PRICE_CLOSE,i);
+      ExtEMA_8[i]=iMA(NULL,timeframe,8,0,MODE_EMA,PRICE_CLOSE,i);
+      ExtEMA_12[i]=iMA(NULL,timeframe,12,0,MODE_EMA,PRICE_CLOSE,i);
+      ExtEMA_16[i]=iMA(NULL,timeframe,16,0,MODE_EMA,PRICE_CLOSE,i);
+      ExtEMA_20[i]=iMA(NULL,timeframe,20,0,MODE_EMA,PRICE_CLOSE,i);
+
+      //--- GMMA Investors
+      ExtEMA_30[i]=iMA(NULL,timeframe,30,0,MODE_EMA,PRICE_CLOSE,i);
+      ExtEMA_35[i]=iMA(NULL,timeframe,35,0,MODE_EMA,PRICE_CLOSE,i);
+      ExtEMA_40[i]=iMA(NULL,timeframe,40,0,MODE_EMA,PRICE_CLOSE,i);
+      ExtEMA_45[i]=iMA(NULL,timeframe,45,0,MODE_EMA,PRICE_CLOSE,i);
+      ExtEMA_50[i]=iMA(NULL,timeframe,50,0,MODE_EMA,PRICE_CLOSE,i);
+      ExtEMA_55[i]=iMA(NULL,timeframe,55,0,MODE_EMA,PRICE_CLOSE,i);
+      ExtEMA_60[i]=iMA(NULL,timeframe,60,0,MODE_EMA,PRICE_CLOSE,i);
+   }
+
+   for(int i = limit; i >= 0; i--)
+   {
+      // Calculate current and previous EMA values
+      double GT1_0 = ExtEMA_4[i];
+      double GT1_1 = ExtEMA_4[i+1];
+
+      double GT2_0 = ExtEMA_8[i];
+      double GT2_1 = ExtEMA_8[i+1];
+
+      double GT3_0 = ExtEMA_12[i];
+      double GT3_1 = ExtEMA_12[i+1];
+
+      double GT4_0 = ExtEMA_16[i];
+      double GT4_1 = ExtEMA_16[i+1];
+
+      double GT5_0 = ExtEMA_20[i];
+      double GT5_1 = ExtEMA_20[i+1];
+
+      double GI1_0 = ExtEMA_30[i];
+      double GI1_1 = ExtEMA_30[i+1];
+
+      double GI2_0 = ExtEMA_35[i];
+      double GI2_1 = ExtEMA_35[i+1];
+
+      double GI3_0 = ExtEMA_40[i];
+      double GI3_1 = ExtEMA_40[i+1];
+      
+      double GI4_0 = ExtEMA_45[i];
+      double GI4_1 = ExtEMA_45[i+1];
+
+      double GI5_0 = ExtEMA_50[i];
+      double GI5_1 = ExtEMA_50[i+1];
+
+      double GI6_0 = ExtEMA_55[i];
+      double GI6_1 = ExtEMA_55[i+1];
+
+      double GI7_0 = ExtEMA_60[i];
+      double GI7_1 = ExtEMA_60[i+1];
+
+      //**************************
+      // Conditions for signals
+      //**************************
+
+      int GT_above      = 0;
+      int GT_below      = 0;
+      int GT_increase   = 0;
+      int GT_decrease   = 0;
+      
+      int GI_above      = 0;
+      int GI_below      = 0;
+      int GI_increase   = 0;
+      int GI_decrease   = 0;
+
+      //--- GT lines are in an uptrend order
+      if(GT3_0 > GT4_0) GT_above++;
+      if(GT4_0 > GT5_0) GT_above++;
+      if(GT5_0 > GI1_0) GT_above++;
+
+      //--- GT lines are in a downtrend order
+      if(GT3_0 < GT4_0) GT_below++;
+      if(GT4_0 < GT5_0) GT_below++;
+      if(GT5_0 < GI1_0) GT_below++;
+
+      //--- GT lines are increasing
+      if(GT3_0 > GT3_1) GT_increase++;
+      if(GT4_0 > GT4_1) GT_increase++;
+      if(GT5_0 > GT5_1) GT_increase++;
+
+      //--- GT lines are decreasing
+      if(GT3_0 < GT3_1) GT_decrease++;
+      if(GT4_0 < GT4_1) GT_decrease++;
+      if(GT5_0 < GT5_1) GT_decrease++;
+
+      //--- GI lines are in an uptrend order
+      if(GI1_0 > GI2_0) GI_above++;
+      if(GI2_0 > GI3_0) GI_above++;
+      if(GI3_0 > GI4_0) GI_above++;
+      if(GI4_0 > GI5_0) GI_above++;
+      if(GI5_0 > GI6_0) GI_above++;
+      if(GI6_0 > GI7_0) GI_above++;
+
+      //--- GI lines are in a downtrend order
+      if(GI1_0 < GI2_0) GI_below++;
+      if(GI2_0 < GI3_0) GI_below++;
+      if(GI3_0 < GI4_0) GI_below++;
+      if(GI4_0 < GI5_0) GI_below++;
+      if(GI5_0 < GI6_0) GI_below++;
+      if(GI6_0 < GI7_0) GI_below++;
+      
+      //--- GI lines are increasing
+      if(GI1_0 > GI1_1) GI_increase++;
+      if(GI2_0 > GI2_1) GI_increase++;
+      if(GI3_0 > GI3_1) GI_increase++;
+      if(GI4_0 > GI4_1) GI_increase++;
+      if(GI5_0 > GI5_1) GI_increase++;
+      if(GI6_0 > GI6_1) GI_increase++;
+      if(GI7_0 > GI7_1) GI_increase++;
+
+      //--- GI lines are decreasing
+      if(GI1_0 < GI1_1) GI_decrease++;
+      if(GI2_0 < GI2_1) GI_decrease++;
+      if(GI3_0 < GI3_1) GI_decrease++;
+      if(GI4_0 < GI4_1) GI_decrease++;
+      if(GI5_0 < GI5_1) GI_decrease++;
+      if(GI6_0 < GI6_1) GI_decrease++;
+      if(GI7_0 < GI7_1) GI_decrease++;
+
+      //--- Calculate polarity and direction
+      int GT_polarity   = 0;
+      int GT_direction  = 0;
+      int GI_direction  = 0;
+   
+      if((GT_above > prev_GT_above && GT_below < prev_GT_below) || GT_above == 3)
+         GT_polarity = 1;
+      else if((GT_below > prev_GT_below && GT_above < prev_GT_above) || GT_below == 3)
+         GT_polarity = -1;
+
+      if((GT_increase > prev_GT_increase && GT_decrease < prev_GT_decrease) || GT_increase == 3)
+         GT_direction = 1;
+      if((GT_decrease > prev_GT_decrease && GT_increase < prev_GT_increase) || GT_decrease == 3)
+         GT_direction = -1;
+
+      if((GI_increase > prev_GI_increase && GI_decrease < prev_GI_decrease) || GI_increase == 7)
+         GI_direction = 1;
+      if((GI_decrease > prev_GI_decrease && GI_increase < prev_GI_increase) || GI_decrease == 7)
+         GI_direction = -1;
+         
+      prev_GT_above     = GT_above;
+      prev_GT_below     = GT_below;
+      prev_GT_increase  = GT_increase;
+      prev_GT_decrease  = GT_decrease;
+      prev_GI_increase  = GI_increase;
+      prev_GI_decrease  = GI_decrease;
+
+      //--- GT lines are in an uptrend order
+      bool GT_uptrend      = GT3_0 > GT4_0 && GT4_0 > GT5_0;
+      bool GT_downtrend    = GT3_0 < GT4_0 && GT4_0 < GT5_0;
+
+      //--- At least one GT line is increasing
+      bool GT_increaseOne  = GT3_0 > GT3_1 || GT4_0 > GT4_1 || GT5_0 > GT5_1;
+      bool GT_decreaseOne  = GT3_0 < GT3_1 || GT4_0 < GT4_1 || GT5_0 < GT5_1;
+
+      //--- GT lines are above GI lines
+      bool GT_aboveGI   = GT3_0 > MathMax(GI1_0, GI7_0) && GT4_0 > MathMax(GI1_0, GI7_0) && GT5_0 > MathMax(GI1_0, GI7_0); 
+      bool GT_belowGI   = GT3_0 < MathMin(GI1_0, GI7_0) && GT4_0 < MathMin(GI1_0, GI7_0) && GT5_0 < MathMin(GI1_0, GI7_0); 
+
+      //--- GI lines are in an uptrend order
+      bool GI_uptrend   = GI_above == 6; 
+      bool GI_downtrend = GI_below == 6;; 
+
+      //--- Price closes above GI lines
+      bool closeAbove = close[i] > MathMax(GI1_0, GI7_0);
+      bool closeBelow = close[i] < MathMin(GI1_0, GI7_0);
+
+       // Polarity - All the conditions need to be true to confirm the trend
+      bool polarityUp   = GT_uptrend && GT_aboveGI; // && !GI_downtrend; // && closeAbove;
+      bool polarityDown = GT_downtrend && GT_belowGI; // && !GI_uptrend; // && closeBelow;
+
+      // Slope - All the conditions need to be true to confirm the trend
+      bool slopeUp   = GT_increaseOne && GI_increase >= 4;
+      bool slopeDown = GT_decreaseOne && GI_decrease >= 4;
+
+      double sump = 0;
+      double sumn = 0;
+
+      if(polarityUp && slopeUp)
+         sump = 1;
+      else if(GT_polarity == 1 && GT_direction == 1 && GI_direction == 1)
+         sump = 0.0;
+         
+      if(polarityDown && slopeDown)
+         sumn = 1;
+      else if(GT_polarity == -1 && GT_direction == -1 && GI_direction == -1)
+         sumn = 0.0;
+      /*
+      if((GT_aboveGI) && (GT_uptrend || GT_increaseOne || GI_increase >= 3.5) && GI_decrease < 7 && closeAbove && !GI_downtrend) // && closeAbove)
+         sump++;
+      else if((GT_belowGI) && (GT_downtrend || GT_decreaseOne || GI_decrease >= 3.5) && GI_increase < 7 && closeBelow && !GI_uptrend) // && closeBelow)
+         sumn++;
+      */
+
+      SumPosBuffer[i] = sump;
+      SumNegBuffer[i] = sumn;
+   }
+   
+   for(int i = limit; i >= 0; i--)
+   {
+      double sump = 0;
+      double sumn = 0;
+        
+      for(int bar = 0; bar < period; bar++)
+      {
+         sump += (period - bar) * SumPosBuffer[i + bar];
+         sumn += (period - bar) * SumNegBuffer[i + bar];
+         //Print("Limit ", limit, " i ", i, " Period ", period, " Bar ", bar, " MomBuffer ", MomBuffer[i + bar], " Sum ", sum);
+      }
+      EMAPosBuffer[i] = sump / divider;
+      EMANegBuffer[i] = sumn / divider;
+
+      //EMAPosBuffer[i] = SumPosBuffer[i];
+      //EMANegBuffer[i] = SumNegBuffer[i];
+
+      double advance_0 = EMAPosBuffer[i];
+      double advance_1 = EMAPosBuffer[i+1];
+      double decline_0 = EMANegBuffer[i];
+      double decline_1 = EMANegBuffer[i+1];
+
+      //--- Calculate conditions for uptrend and downtrend      
+      double max  = 1; //iCustom(NULL, 0, "#property indicator_maximum", 0, 0);
+      double min  = 0;
+
+      bool advance_top = advance_0 == max;
+      bool advance_above = advance_0 > decline_0;
+      bool advance_increase = advance_0 > advance_1;
+      bool advance_flat = advance_0 == advance_1 && advance_0 < max && advance_0 > min;
+      bool advance_fading = advance_0 < advance_1;
+      bool advance_bottom = advance_0 == min;
+
+      bool decline_top = decline_0 == max;
+      bool decline_above = decline_0 > advance_0;
+      bool decline_increase = decline_0 > decline_1;
+      bool decline_flat = decline_0 == decline_1 && decline_0 < max && decline_0 > min;
+      bool decline_fading = decline_0 < decline_1;
+      bool decline_bottom = decline_0 == min;
+      
+      bool upcycle_diverging = (advance_increase && (decline_fading || decline_bottom));
+      bool upcycle_converging = (advance_fading && (decline_increase || decline_bottom));
+      
+      bool downcycle_diverging = (decline_increase && (advance_fading || advance_bottom));
+      bool downcycle_converging = (decline_fading && (advance_increase || advance_bottom));
+
+      //--- Calculate advance signal values
+      int advance_signal = 0;
+      int sideway_signal = 0;
+      int decline_signal = 0;
+
+      if((advance_increase || advance_top) && (decline_fading || decline_bottom))
+      {
+         advance_signal = 2;
+         prev_uptrend = true;   
+      } 
+      else if(prev_uptrend == true)
+      {
+         if(advance_flat && (decline_flat || decline_fading || decline_bottom))
+            advance_signal = 2;
+         else if(advance_fading && (decline_flat || decline_fading || decline_bottom))
+            advance_signal = 1;
+         else
+         {
+            advance_signal = 0;
+            prev_uptrend = false;
+         }
+      }
+      else
+      {
+         advance_signal = 0;
+         prev_uptrend = false;
+      }
+
+      //--- Calculate decline signal values
+      if((decline_increase || decline_top) && (advance_fading || advance_bottom))
+      {
+         decline_signal = 2;
+         prev_downtrend = true;   
+      } 
+      else if(prev_downtrend == true)
+      {
+         if(decline_flat && (advance_flat || advance_fading || advance_bottom))
+            decline_signal = 2;
+         else if(decline_fading && (advance_flat || advance_fading || advance_bottom))
+            decline_signal = 1;
+         else
+         {
+            decline_signal = 0;
+            prev_downtrend = false;
+         }
+      }
+      else
+      {
+         decline_signal = 0;
+         prev_downtrend = false;
+      }
+
+      //--- calculate signal buffer value
+      if(advance_signal == 2)
+         Signal[i] = 1;
+      else if(decline_signal == 2)
+         Signal[i] = -1;
+      else
+         Signal[i] = 0;
+         
+      //--- Set correct arrow based on signal value
+      double upper   = 0.8 * max;
+      double middle  = 0.5 * max;
+      double lower   = 0.2 * max;
+
+      if(advance_signal == 2)
+      {
+         ArrowUpStrong[i]     = upper;
+         ArrowUp[i]           = 0;
+      }
+      else if(advance_signal == 1)
+      {
+         ArrowUpStrong[i]     = 0;
+         ArrowUp[i]           = 0;
+      }
+      else if(advance_signal == 0)
+      {
+         ArrowUpStrong[i]     = 0;
+         ArrowUp[i]           = 0;
+      }
+
+      if(decline_signal == 2)
+      {
+         ArrowDown[i]         = 0;
+         ArrowDownStrong[i]   = lower;
+      }               
+      else if(decline_signal == 1)
+      {
+         ArrowDown[i]         = 0;
+         ArrowDownStrong[i]   = 0;
+      }
+      else if(decline_signal == 0)
+      {
+         ArrowDown[i]         = 0;
+         ArrowDownStrong[i]   = 0;
+      }           
+   }
+
+   return(rates_total);
+}
