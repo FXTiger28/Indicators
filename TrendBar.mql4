@@ -1,0 +1,446 @@
+//+------------------------------------------------------------------+
+//|                                                     TrendBar.mq4 |
+//|                                          Copyright 2023, FXTiger |
+//|                                              http://www.mql4.com |
+//+------------------------------------------------------------------+
+
+/*
+What is a trendbar?
+- Trendbar tells the next likely swing
+
+Calculate HA candles
+Use HA values to calculate Chandelier buffers
+Chandelier tells the market direction
+The direction always stays the same until chandelier decides that the direction changes
+Set the color of the candles based on the market direction
+*/
+
+#property copyright   "2023, FXTiger"
+#property strict
+#property indicator_chart_window
+#property indicator_buffers 20
+
+// input parameters
+extern int      Range         = 30;
+extern int      ATRPeriod     = 30;
+extern int      MultipleATR   = 1;
+extern int      RSIPeriod     = 5;
+extern color    Advance       = clrLime;
+extern color    Pullback      = clrGreen;
+extern color    Decline       = clrDeepPink;
+extern color    Bounce        = clrMaroon;
+
+// Bar buffers
+double AdvanceLow[];
+double AdvanceHigh[];
+double DeclineLow[];
+double DeclineHigh[];
+double AdvanceOpen[];
+double AdvanceClose[];
+double DeclineOpen[];
+double DeclineClose[];
+
+// Heikin Ashi buffers
+double HaLow[];
+double HaHigh[];
+double HaOpen[];
+double HaClose[];
+
+// Chandelier buffers
+double rangeLow[];
+double rangeHigh[];
+double advanceArea[];
+double declineArea[];
+
+// RSI buffers
+double PosBuffer[];
+double NegBuffer[];
+double RSIBuffer[];
+
+// Trend
+double direction[];
+int    cycle;
+
+//+------------------------------------------------------------------+
+//| Custom indicator initialization function                         |
+//|------------------------------------------------------------------|
+void OnInit(void)
+  {
+   IndicatorShortName("Trend Bars");
+   IndicatorDigits(Digits);
+   IndicatorBuffers(20);
+
+//---- indicator buffers mapping
+   // Heiken Ashi
+   SetIndexBuffer(0,HaLow);
+   SetIndexBuffer(1,HaHigh);
+   SetIndexBuffer(2,HaOpen);
+   SetIndexBuffer(3,HaClose);
+
+   // Chandelier
+   SetIndexBuffer(4,rangeLow);
+   SetIndexBuffer(5,rangeHigh);
+   SetIndexBuffer(6,advanceArea);
+   SetIndexBuffer(7,declineArea);
+   
+   // RSI
+   SetIndexBuffer(8,RSIBuffer);
+   SetIndexBuffer(9,PosBuffer);
+   SetIndexBuffer(10,NegBuffer);
+   
+   // Direction
+   SetIndexBuffer(11,direction);
+   
+   // Bars
+   SetIndexBuffer(12,AdvanceLow);
+   SetIndexBuffer(13,AdvanceHigh);
+   SetIndexBuffer(14,DeclineLow);
+   SetIndexBuffer(15,DeclineHigh);
+   SetIndexBuffer(16,AdvanceOpen);
+   SetIndexBuffer(17,AdvanceClose);
+   SetIndexBuffer(18,DeclineOpen);
+   SetIndexBuffer(19,DeclineClose);
+   
+
+//--- drawing settings
+   SetIndexStyle(0,DRAW_NONE);
+   SetIndexStyle(1,DRAW_NONE);
+   SetIndexStyle(2,DRAW_NONE);
+   SetIndexStyle(3,DRAW_NONE);
+   SetIndexStyle(4,DRAW_NONE);
+   SetIndexStyle(5,DRAW_NONE);
+   SetIndexStyle(6,DRAW_LINE,0,3,clrLime);
+   SetIndexStyle(7,DRAW_LINE,0,3,clrMagenta);
+   SetIndexStyle(8,DRAW_NONE);
+   SetIndexStyle(9,DRAW_NONE);
+   SetIndexStyle(10,DRAW_NONE);
+   SetIndexStyle(11,DRAW_NONE);
+
+   SetIndexStyle(12,DRAW_HISTOGRAM,0,1,Pullback);  // AdvanceLow
+   SetIndexStyle(13,DRAW_HISTOGRAM,0,1,Advance);   // AdvanceHigh
+   
+   SetIndexStyle(14,DRAW_HISTOGRAM,0,1,Decline);    // DeclineLow
+   SetIndexStyle(15,DRAW_HISTOGRAM,0,1,Bounce);   // DeclineHigh
+   
+   SetIndexStyle(16,DRAW_HISTOGRAM,0,5,Pullback);  // AdvanceOpen
+   SetIndexStyle(17,DRAW_HISTOGRAM,0,5,Advance);   // AdvanceClose
+   
+   SetIndexStyle(18,DRAW_HISTOGRAM,0,5,Bounce);   // DeclineOpen
+   SetIndexStyle(19,DRAW_HISTOGRAM,0,5,Decline);    // DeclineClose
+
+   SetIndexLabel(0,"Low");
+   SetIndexLabel(1,"High");
+   SetIndexLabel(2,"Open");
+   SetIndexLabel(3,"Close");
+   SetIndexLabel(4,"Advance");
+   SetIndexLabel(5,"Decline");
+   SetIndexLabel(6,"RSI");
+   SetIndexLabel(7,"Positive");
+   SetIndexLabel(8,"Negative");
+   SetIndexLabel(9,"Direction");
+
+//---- 0 value will not be displayed
+   SetIndexEmptyValue(0,0);
+   SetIndexEmptyValue(1,0);
+   SetIndexEmptyValue(2,0);
+   SetIndexEmptyValue(3,0);
+   SetIndexEmptyValue(4,0);
+   SetIndexEmptyValue(5,0);
+   SetIndexEmptyValue(6,0);
+   SetIndexEmptyValue(7,0);
+   SetIndexEmptyValue(8,0);
+   SetIndexEmptyValue(9,0);
+   SetIndexEmptyValue(10,0);
+   SetIndexEmptyValue(11,0);
+   SetIndexEmptyValue(12,0);
+   SetIndexEmptyValue(13,0);
+   SetIndexEmptyValue(14,0);
+   SetIndexEmptyValue(15,0);
+   SetIndexEmptyValue(16,0);
+   SetIndexEmptyValue(17,0);
+   SetIndexEmptyValue(18,0);
+   SetIndexEmptyValue(19,0);
+/*
+   SetIndexDrawBegin(0,10);
+   SetIndexDrawBegin(1,10);
+   SetIndexDrawBegin(2,10);
+   SetIndexDrawBegin(3,10);
+   SetIndexDrawBegin(6,10);
+   SetIndexDrawBegin(7,10);
+*/   
+//--- initialization done
+  }
+//+------------------------------------------------------------------+
+//| Heiken Ashi                                                      |
+//+------------------------------------------------------------------+
+int OnCalculate(const int rates_total,
+                const int prev_calculated,
+                const datetime &time[],
+                const double &open[],
+                const double &high[],
+                const double &low[],
+                const double &close[],
+                const long &tick_volume[],
+                const long &volume[],
+                const int &spread[])
+  {
+  
+   int limit = rates_total-prev_calculated;
+   if(limit > rates_total-Range) limit = rates_total-Range;    // First bars in the period range should not be counted
+   if(prev_calculated > 0) limit++;                            // Calculate new values for every tick
+
+   double haOpen = 0, haHigh = 0, haLow = 0, haClose = 0;
+
+   // set first candle
+   if(prev_calculated == 0)
+   {
+      int i = limit - 1;
+      if(open[i]<close[i])
+        {
+         HaLow[i]=low[i];
+         HaHigh[i]=high[i];
+        }
+      else
+        {
+         HaLow[i]=high[i];
+         HaHigh[i]=low[i];
+        }
+
+      HaOpen[i]=open[i];
+      HaClose[i]=close[i];
+      limit--;
+   }
+
+   // Heikin Ashi
+   for(int i = limit -1; i >= 0; i--)
+   {
+      haOpen  = (HaOpen[i+1]+HaClose[i+1])/2;
+      haClose = (open[i]+high[i]+low[i]+close[i])/4;
+      haHigh  = MathMax(high[i],MathMax(haOpen,haClose));
+      haLow   = MathMin(low[i],MathMin(haOpen,haClose));
+
+      HaOpen[i]  = haOpen;
+      HaClose[i] = haClose;
+      HaHigh[i]  = haHigh;
+      HaLow[i]   = haLow;
+/*
+      if(haOpen < haClose)
+      {
+         HaLow[i] = haLow;
+         HaHigh[i]= haHigh;
+      }
+      else
+      {
+         HaLow[i]  = haHigh;
+         HaHigh[i] = haLow;
+      }
+*/
+/*      
+      if(haClose > iMA(NULL, 0, 20, 0, MODE_EMA,PRICE_CLOSE,i))
+      {
+         if(haOpen < haClose)
+         {
+            AdvanceLow[i] = haLow;
+            AdvanceHigh[i]= haHigh;
+            DeclineLow[i] = 0;
+            DeclineHigh[i]= 0;
+         }
+         else
+         {
+            AdvanceLow[i] = haHigh;
+            AdvanceHigh[i]= haLow;
+            DeclineLow[i] = 0;
+            DeclineHigh[i]= 0;
+         }
+         AdvanceOpen[i]  = haOpen;
+         AdvanceClose[i] = haClose;
+         DeclineOpen[i]  = 0;
+         DeclineClose[i] = 0;
+         
+      }
+      else
+      {
+         if(haOpen < haClose)
+         {
+            AdvanceLow[i] = 0;
+            AdvanceHigh[i]= 0;
+            DeclineLow[i] = haHigh;
+            DeclineHigh[i]= haLow;
+         }
+         else
+         {
+            AdvanceLow[i] = 0;
+            AdvanceHigh[i]= 0;
+            DeclineLow[i] = haLow;
+            DeclineHigh[i]= haHigh;
+         }
+         AdvanceOpen[i]  = 0;
+         AdvanceClose[i] = 0;
+         DeclineOpen[i]  = haOpen;
+         DeclineClose[i] = haClose;
+      }      
+*/      
+   }
+
+   // Chandelier
+   for(int i = limit -1; i >= 0; i--)
+   {
+      int minOpenValueIdx = 0;
+      int minCloseValueIdx = 0;
+      int maxOpenValueIdx = 0;
+      int maxCloseValueIdx = 0;
+      rangeLow[i] = 0;
+      rangeHigh[i] = 0;
+      advanceArea[i] = 0;
+      declineArea[i] = 0;
+
+      double ATRvalue=iATR(NULL,0,ATRPeriod,0)*MultipleATR;
+
+      minOpenValueIdx  = ArrayMinimum(HaOpen, Range, i);
+      minCloseValueIdx = ArrayMinimum(HaClose, Range, i);
+      rangeLow[i]      = MathMin(HaOpen[minOpenValueIdx], HaClose[minCloseValueIdx]) - ATRvalue;  // calculate bar low
+      
+      maxOpenValueIdx  = ArrayMaximum(HaOpen, Range, i);
+      maxCloseValueIdx = ArrayMaximum(HaClose, Range, i);
+      rangeHigh[i]     = MathMax(HaOpen[maxOpenValueIdx], HaClose[maxCloseValueIdx]) + ATRvalue;  // calculate bar high
+
+      //--- Direction
+      direction[i] = direction[i+1];
+      
+      if(HaClose[i] > rangeHigh[i+1]) direction[i] =  1;
+      if(HaClose[i] < rangeLow[i+1]) direction[i] =  -1;
+
+      if (direction[i]>0)
+      {
+         if(rangeLow[i] < rangeLow[i+1])    // is the current low lower than the previous low
+            rangeLow[i]=rangeLow[i+1];      // if yes use the previous low as range low
+         advanceArea[i]=rangeLow[i];        // set the sl for long position
+         declineArea[i]=rangeHigh[i];
+      }                 
+      if (direction[i]<0)
+      {
+         if(rangeHigh[i] > rangeHigh[i+1])  // is the current high is higher than the previous high
+            rangeHigh[i]=rangeHigh[i+1];    // if yes use the previous high as range high
+         declineArea[i]=rangeHigh[i];       // set the sl for long position
+         advanceArea[i]=rangeLow[i];
+      }
+   }
+
+   // Bars
+   for(int i = limit -1; i >= 0; i--)
+   {
+      // Cycle
+      if(cycle == 1)
+      {
+         if(HaClose[i] < HaOpen[i] && HaClose[i] < HaOpen[i+1]) cycle = -1;
+      }
+      else if(cycle == -1)
+      {
+         if(HaClose[i] > HaOpen[i] && HaClose[i] > HaOpen[i+1]) cycle = 1;
+      }
+      else if(cycle == 0)
+      {
+         if(HaClose[i] > HaOpen[i])
+            cycle = 1;
+         else
+            cycle = -1;
+      }
+
+      if(direction[i] > 0)
+      {
+         if(cycle == 1)
+         {
+            AdvanceLow[i] = HaLow[i];
+            AdvanceHigh[i]= HaHigh[i];       // Show lime shadow
+            if(HaClose[i] > HaOpen[i])
+            {
+               AdvanceOpen[i]  = HaOpen[i];
+               AdvanceClose[i] = HaClose[i]; // Show lime bar
+            }
+            else
+            {
+               AdvanceOpen[i]  = HaClose[i];
+               AdvanceClose[i] = HaOpen[i];  // Show lime bar
+            }
+         }
+         else if(cycle == -1)
+         {
+            AdvanceLow[i] = HaHigh[i];       // Show green shadow
+            AdvanceHigh[i]= HaLow[i];
+            if(HaClose[i] > HaOpen[i])
+            {
+               AdvanceOpen[i]  = HaClose[i]; // Show green bar
+               AdvanceClose[i] = HaOpen[i];
+            }
+            else
+            {
+               AdvanceOpen[i]  = HaOpen[i];  // Show green bar
+               AdvanceClose[i] = HaClose[i];
+            }
+         }
+         DeclineLow[i]  = 0;
+         DeclineHigh[i] = 0;
+         DeclineOpen[i] = 0;
+         DeclineClose[i]= 0;
+      }
+      else
+      {
+         if(cycle == 1)
+         {
+            DeclineLow[i] = HaLow[i];       
+            DeclineHigh[i]= HaHigh[i];       // Show maroon shadow
+            if(HaClose[i] > HaOpen[i])
+            {
+               DeclineOpen[i]  = HaClose[i];
+               DeclineClose[i] = HaOpen[i];  // Show maroon bar
+            }
+            else
+            {
+               DeclineOpen[i]  = HaOpen[i];
+               DeclineClose[i] = HaClose[i]; // Show maroon bar
+            }
+         }
+         else if(cycle == -1)
+         {
+            DeclineLow[i] = HaHigh[i];       // Show pink shadow
+            DeclineHigh[i]= HaLow[i];       
+            if(HaClose[i] > HaOpen[i])
+            {
+               DeclineOpen[i]  = HaOpen[i];
+               DeclineClose[i] = HaClose[i]; // Show pink bar
+            }
+            else
+            {
+               DeclineOpen[i]  = HaClose[i];
+               DeclineClose[i] = HaOpen[i];  // Show pink bar
+            }
+         }
+         AdvanceLow[i]  = 0;
+         AdvanceHigh[i] = 0;
+         AdvanceOpen[i] = 0;
+         AdvanceClose[i]= 0;
+      }
+   }  
+   
+/*      
+      //--- RSI
+      double sumn = 0.0, sump = 0.0;
+      double relation = CloseBuffer[i] - OpenBuffer[i];	// Relation between opening and closing prices
+		if(relation > 0)										// Bullish Heikin Ashi candle
+		   sump += relation;		
+      else														// Bearish Heikin Ashi candle
+         sumn -= relation;
+      PosBuffer[i] = (PosBuffer[i-1] * (RSIPeriod - 1) + sump) / RSIPeriod;
+      NegBuffer[i] = (NegBuffer[i-1] * (RSIPeriod - 1) + sumn) / RSIPeriod;
+      if(NegBuffer[i] == 0.0) RSIBuffer[i] = 100.0;
+      else RSIBuffer[i] = 100.0 - 100.0 / (1 + PosBuffer[i] / NegBuffer[i]);
+
+   }
+*/      
+
+   
+     
+   return(rates_total);
+  }
+//+------------------------------------------------------------------+
+
